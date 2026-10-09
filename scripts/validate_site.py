@@ -41,8 +41,37 @@ def https(value: object, where: str) -> None:
     require(not any(c.isspace() for c in value), f'{where}: whitespace in URL')
 
 
+def validate_pipeline(value: object) -> None:
+    keys(value, {'checked_at', 'state', 'message', 'source_listing_date', 'source_count',
+                 'section_counts', 'latest_generated_date'}, 'pipeline')
+    text(value['checked_at'], 'pipeline timestamp')
+    at = dt.datetime.fromisoformat(value['checked_at'].replace('Z', '+00:00'))
+    require(at.tzinfo is not None, 'pipeline timestamp must contain timezone')
+    states = {'initialized', 'waiting_model', 'generated', 'no_new', 'source_dates_disagree',
+              'source_stale', 'source_regression', 'source_incomplete', 'source_error',
+              'model_error', 'waiting_quota', 'internal_error'}
+    require(value['state'] in states, 'unknown pipeline state')
+    text(value['message'], 'pipeline message')
+    require(len(value['message']) <= 240, 'pipeline message too long')
+    for field in ('source_listing_date', 'latest_generated_date'):
+        if value[field] is not None:
+            require(isinstance(value[field], str) and bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', value[field])), 'pipeline date')
+            dt.date.fromisoformat(value[field])
+    count = value['source_count']
+    require(count is None or (type(count) is int and 0 <= count <= 2000), 'pipeline count')
+    if value['section_counts'] is not None:
+        keys(value['section_counts'], {'new', 'cross-list', 'revised'}, 'section_counts')
+        require(all(type(v) is int and v >= 0 for v in value['section_counts'].values()), 'section count')
+        require(sum(value['section_counts'].values()) == count, 'section sum')
+    if value['state'] in {'generated', 'no_new'}:
+        require(value['source_listing_date'] is not None and value['source_listing_date'] == value['latest_generated_date'], 'state date mismatch')
+
+
 def validate(data: object) -> None:
-    keys(data, TOP, 'export')
+    require(isinstance(data, dict), 'export must be an object')
+    require(set(data) in (TOP, TOP | {'pipeline'}), 'export fields')
+    if 'pipeline' in data:
+        validate_pipeline(data['pipeline'])
     require(type(data['schema_version']) is int and data['schema_version'] == 1,
             'unsupported schema')
     require(data['generation_status'] in {'not_configured', 'configured'},
@@ -106,6 +135,8 @@ def validate(data: object) -> None:
                     own_source = True
             require(own_source, 'matching arXiv source required')
 
+    if 'pipeline' in data:
+        require(data['pipeline']['latest_generated_date'] == max(dates, default=None), 'pipeline cursor does not match digests')
 
 def validate_site(site: Path) -> None:
     # Never upload the repository root, private database, or history bundle.
