@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+*.sqlite*
+*.db
+*.zip
+auth.json
+owner.key
+.codex/
+.venv/
+__pycache__/
+.pytest_cache/
+private/
+history-sources/
+qa-output/
