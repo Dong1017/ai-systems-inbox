@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "day": "2026-10-09",
+  "calls": 0,
+  "batch_key": "b4911b1683171186de48d3e5bc494360e525cdcf0e59f544d251dc18679f0d88",
+  "listing_date": "2026-10-09",
+  "counts": {
+    "new": 8,
+    "cross-list": 4,
+    "revised": 13
+  },
+  "papers": {}
+}
