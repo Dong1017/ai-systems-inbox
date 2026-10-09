@@ -1,12 +1,10 @@
-name: Update and publish Inbox
+name: Publish Inbox analysis
 
 on:
-  schedule:
-    # Shanghai 10:17 and 14:17. Only a new complete batch invokes the model.
-    - cron: '17 2,6 * * *'
   push:
     branches: [main]
     paths:
+      - 'data/digests/**'
       - 'site/**'
       - 'scripts/**'
       - 'tests/**'
@@ -25,39 +23,21 @@ jobs:
   prepare:
     if: github.repository == 'Dong1017/ai-systems-inbox' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    permissions:
-      contents: write
+    timeout-minutes: 5
     outputs:
       digest_sha: ${{ steps.hash.outputs.sha }}
-      state: ${{ steps.collect.outputs.state }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: main
-      - name: Install collector dependency
+          persist-credentials: false
+      - name: Install dependency for existing offline regression tests
         run: python3 -m pip install -r requirements-pipeline.txt
-      - name: Test before collecting or using credentials
+      - name: Test public data contracts
         run: python3 -m unittest discover -s tests -v
-      - name: Collect and conditionally generate
-        id: collect
-        env:
-          INBOX_GENERATION_ENABLED: ${{ vars.INBOX_GENERATION_ENABLED }}
-          INBOX_GEMINI_API_KEY: ${{ secrets.INBOX_GEMINI_API_KEY }}
-        run: python3 scripts/update_digest.py
+      - name: Assemble already-written analysis (no model, no arXiv fetch)
+        run: python3 scripts/build_site.py
       - name: Validate public data and publication boundary
         run: python3 scripts/validate_site.py
-      - name: Persist results for idempotency and resume
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- site/digests.json
-          if [ -f data/generation-cache.json ]; then git add -- data/generation-cache.json; fi
-          if ! git diff --cached --quiet; then
-            git commit -m 'data: refresh cs.DC pipeline state'
-            # No force-push. A concurrent incompatible update must fail visibly.
-            git push origin HEAD:main
-          fi
       - name: Record exact public payload hash
         id: hash
         run: echo "sha=$(sha256sum site/digests.json | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -89,7 +69,6 @@ jobs:
           python3 - <<'PY'
           import hashlib, json, os, time
           from urllib.request import Request, urlopen
-          from urllib.parse import urlsplit
           from urllib.error import URLError
           base = os.environ['SITE_URL'].rstrip('/') + '/'
           if base != 'https://dong1017.github.io/ai-systems-inbox/':
@@ -113,19 +92,10 @@ jobs:
                       raise ValueError('CDN has not served this run yet')
                   d = json.loads(raw)
                   print('PASS: public HTML and exact digest SHA-256')
-                  print('Batches:', len(d['digests']), 'Pipeline:', d.get('pipeline', {}).get('state'))
+                  print('Readable digests:', len(d['digests']))
+                  print('Complete digests:', sum(x.get('complete', True) for x in d['digests']))
                   break
               except (URLError, OSError, ValueError):
                   if attempt == 5: raise
                   time.sleep(10)
           PY
-      - name: Report collection and generation separately from deployment
-        env:
-          PIPELINE_STATE: ${{ needs.prepare.outputs.state }}
-        run: |
-          case "$PIPELINE_STATE" in
-            waiting_model) echo '::warning::Model not authorized. Collection and publishing work, but automatic Chinese analysis is not active.' ;;
-            waiting_quota) echo '::warning::Quota reached; valid progress saved for the next check. No partial digest published.' ;;
-            generated|no_new) echo "Pipeline: $PIPELINE_STATE" ;;
-            *) echo "::error::Pipeline $PIPELINE_STATE. Status page deployed; previous complete digests preserved."; exit 1 ;;
-          esac
