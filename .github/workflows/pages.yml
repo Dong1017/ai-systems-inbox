@@ -50,3 +50,63 @@ jobs:
       - name: Deploy public reading site
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Verify public homepage and digest data
+        env:
+          SITE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import time
+          from urllib.error import URLError
+          from urllib.parse import urlsplit
+          from urllib.request import Request, urlopen
+
+          base = os.environ['SITE_URL'].rstrip('/') + '/'
+          expected = urlsplit(base)
+          if (expected.scheme != 'https' or
+                  expected.hostname != 'dong1017.github.io' or
+                  expected.path != '/ai-systems-inbox/'):
+              raise ValueError('Unexpected deployment URL')
+
+          def read_public(path, content_type):
+              request = Request(base + path, headers={
+                  'User-Agent': 'AI-Systems-Inbox-Pages-Check',
+                  'Cache-Control': 'no-cache',
+              })
+              with urlopen(request, timeout=20) as response:
+                  final_url = urlsplit(response.geturl())
+                  if (response.status != 200 or
+                          final_url.scheme != 'https' or
+                          final_url.netloc != expected.netloc or
+                          final_url.path != expected.path + path):
+                      raise ValueError('Unexpected HTTP status or redirect')
+                  if response.headers.get_content_type() != content_type:
+                      raise ValueError('Unexpected content type for ' + path)
+                  body = response.read(10_000_001)
+                  if len(body) > 10_000_000:
+                      raise ValueError('Public response exceeds check limit')
+              return body.decode('utf-8')
+
+          # Allow a short, bounded window for initial CDN propagation.
+          for attempt in range(1, 7):
+              try:
+                  html = read_public('', 'text/html')
+                  if 'AI Systems' not in html or './digests.json' not in html:
+                      raise ValueError('Expected Inbox homepage was not served')
+                  data = json.loads(read_public('digests.json', 'application/json'))
+                  if (not isinstance(data, dict) or data.get('schema_version') != 1 or
+                          not isinstance(data.get('digests'), list) or
+                          data.get('generation_status') not in {'not_configured', 'configured'}):
+                      raise ValueError('Invalid public digest envelope')
+                  print('PASS: HTTP 200 and expected HTML at ' + base)
+                  print('PASS: HTTP 200 and valid JSON at ' + base + 'digests.json')
+                  print('Published batches: ' + str(len(data['digests'])))
+                  print('Generation status: ' + data['generation_status'])
+                  break
+              except (URLError, OSError, ValueError) as error:
+                  print(f'Public endpoint check {attempt}/6 failed: {error}')
+                  if attempt == 6:
+                      raise
+                  time.sleep(10)
+          PY
