@@ -78,14 +78,20 @@ def validate(data: object) -> None:
             'unknown generation status')
     require(isinstance(data['digests'], list), 'digests must be a list')
     dates: set[str] = set()
+    completed_dates: set[str] = set()
     for digest in data['digests']:
-        keys(digest, DIGEST, 'digest')
+        require(isinstance(digest, dict), 'digest must be an object')
+        require(set(digest) in (DIGEST, DIGEST | {'complete'}), 'unexpected or missing digest fields')
+        require(type(digest.get('complete', True)) is bool, 'complete must be boolean')
         date = digest['listing_date']
         text(date, 'listing_date')
         require(bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', date)), 'date format')
         dt.date.fromisoformat(date)
         require(date not in dates, 'duplicate listing date')
         dates.add(date)
+        # Conversation imports may be readable without proving complete source coverage.
+        if digest.get('complete', True):
+            completed_dates.add(date)
         timestamp = digest['published_at']
         text(timestamp, 'published_at')
         require('T' in timestamp, 'timestamp must contain time')
@@ -136,7 +142,8 @@ def validate(data: object) -> None:
             require(own_source, 'matching arXiv source required')
 
     if 'pipeline' in data:
-        require(data['pipeline']['latest_generated_date'] == max(dates, default=None), 'pipeline cursor does not match digests')
+        require(data['pipeline']['latest_generated_date'] == max(completed_dates, default=None), 'pipeline cursor does not match complete digests')
+
 
 def validate_site(site: Path) -> None:
     # Never upload the repository root, private database, or history bundle.
