@@ -3,7 +3,7 @@
   "generation_status": "not_configured",
   "digests": [],
   "pipeline": {
-    "checked_at": "2026-10-09T13:21:18+00:00",
+    "checked_at": "2026-10-09T14:16:56+00:00",
     "state": "waiting_model",
     "message": "批次已采集；中文整理等待模型授权。未发布原文摘要代替简报。",
     "source_listing_date": "2026-10-09",
